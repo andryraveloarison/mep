@@ -7,7 +7,7 @@ use App\Repository\CommandeRepository;
 use EasyCorp\Bundle\EasyAdminBundle\Config\Dashboard;
 use EasyCorp\Bundle\EasyAdminBundle\Config\MenuItem;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractDashboardController;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
 
@@ -15,17 +15,20 @@ class PaoDashboardController extends AbstractDashboardController
 {
     private CommandeRepository $commandeRepository;
     private CommandeProduitRepository $commandeProduitRepository;
+    private RequestStack $requestStack;
 
     public function __construct(
         CommandeRepository $commandeRepository,
-        CommandeProduitRepository $commandeProduitRepository
+        CommandeProduitRepository $commandeProduitRepository,
+        RequestStack $requestStack
     ) {
         $this->commandeRepository = $commandeRepository;
         $this->commandeProduitRepository = $commandeProduitRepository;
+        $this->requestStack = $requestStack;
     }
 
     #[Route('/pao', name: 'pao_dashboard')]
-    public function index(Request $request): Response
+    public function index(): Response
     {
         // ===== Fenêtres temporelles "aujourd'hui" =====
         $today      = new \DateTimeImmutable('today');
@@ -36,7 +39,7 @@ class PaoDashboardController extends AbstractDashboardController
         $startOfWeek = (new \DateTimeImmutable('monday this week'))->setTime(0, 0, 0);
         $endOfWeek   = (new \DateTimeImmutable('sunday this week'))->setTime(23, 59, 59);
 
-        // ===== 1) Travaux du jour — PAO EN COURS =====
+        // ===== Travaux du jour : EN COURS =====
         $workInProgressToday = (int) $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('COUNT(c.id)')
@@ -45,10 +48,9 @@ class PaoDashboardController extends AbstractDashboardController
             ->setParameter('status', Commande::STATUT_PAO_EN_COURS)
             ->setParameter('start', new \DateTime($startOfDay->format('Y-m-d H:i:s')))
             ->setParameter('end',   new \DateTime($endOfDay->format('Y-m-d H:i:s')))
-            ->getQuery()
-            ->getSingleScalarResult();
+            ->getQuery()->getSingleScalarResult();
 
-        // ===== 2) Travaux du jour — PAO FAIT =====
+        // ===== Travaux du jour : FAIT =====
         $workDoneToday = (int) $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('COUNT(c.id)')
@@ -57,10 +59,9 @@ class PaoDashboardController extends AbstractDashboardController
             ->setParameter('status', Commande::STATUT_PAO_FAIT)
             ->setParameter('start', new \DateTime($startOfDay->format('Y-m-d H:i:s')))
             ->setParameter('end',   new \DateTime($endOfDay->format('Y-m-d H:i:s')))
-            ->getQuery()
-            ->getSingleScalarResult();
+            ->getQuery()->getSingleScalarResult();
 
-        // ===== 3) Travaux du jour — PAO MODIFICATION =====
+        // ===== Travaux du jour : MODIFICATION =====
         $workModificationToday = (int) $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('COUNT(c.id)')
@@ -69,10 +70,9 @@ class PaoDashboardController extends AbstractDashboardController
             ->setParameter('status', Commande::STATUT_PAO_MODIFICATION)
             ->setParameter('start', new \DateTime($startOfDay->format('Y-m-d H:i:s')))
             ->setParameter('end',   new \DateTime($endOfDay->format('Y-m-d H:i:s')))
-            ->getQuery()
-            ->getSingleScalarResult();
+            ->getQuery()->getSingleScalarResult();
 
-        // ===== 4) Travaux de la semaine = EN_COURS + FAIT + MODIFICATION =====
+        // ===== Travaux de la semaine = EN_COURS + FAIT + MODIFICATION =====
         $worksThisWeekCount = (int) $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('COUNT(c.id)')
@@ -85,26 +85,27 @@ class PaoDashboardController extends AbstractDashboardController
             ])
             ->setParameter('weekStart', new \DateTime($startOfWeek->format('Y-m-d H:i:s')))
             ->setParameter('weekEnd',   new \DateTime($endOfWeek->format('Y-m-d H:i:s')))
-            ->getQuery()
-            ->getSingleScalarResult();
+            ->getQuery()->getSingleScalarResult();
 
-        // ===== 5) Graph "PAO FAIT" par jour d’un mois — filtre mois =====
-        // Query param month = 'YYYY-MM' (ex: 2025-10). Par défaut: mois courant.
-        $monthParam = $request->query->get('month');
+        // ===== Graph “PAO FAIT” par jour sur un mois (filtre ?month=YYYY-MM) =====
+        $request    = $this->requestStack->getCurrentRequest();
+        $monthParam = $request?->query->get('month');
+
         if (is_string($monthParam) && preg_match('/^\d{4}-\d{2}$/', $monthParam)) {
             [$y, $m] = explode('-', $monthParam);
             $targetYear  = (int) $y;
             $targetMonth = (int) $m;
         } else {
-            $targetYear  = (int) (new \DateTime())->format('Y');
-            $targetMonth = (int) (new \DateTime())->format('m');
+            $now         = new \DateTimeImmutable('now');
+            $targetYear  = (int) $now->format('Y');
+            $targetMonth = (int) $now->format('m');
             $monthParam  = sprintf('%04d-%02d', $targetYear, $targetMonth);
         }
 
         $startOfTargetMonth = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $targetYear, $targetMonth)))->setTime(0,0,0);
         $endOfTargetMonth   = $startOfTargetMonth->modify('last day of this month')->setTime(23,59,59);
 
-        // Récup toutes les commandes PAO FAIT sur le mois
+        // Récup commandes PAO FAIT sur le mois
         $paoDoneRows = $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('c.id, c.dateCommande')
@@ -113,23 +114,25 @@ class PaoDashboardController extends AbstractDashboardController
             ->setParameter('status', Commande::STATUT_PAO_FAIT)
             ->setParameter('start', new \DateTime($startOfTargetMonth->format('Y-m-d H:i:s')))
             ->setParameter('end',   new \DateTime($endOfTargetMonth->format('Y-m-d H:i:s')))
-            ->getQuery()
-            ->getArrayResult();
+            ->getQuery()->getArrayResult();
 
-        // Agrégation par jour (en PHP pour portabilité)
+        // Agrégation par jour en PHP
         $daysInMonth = (int) $startOfTargetMonth->format('t');
         $byDay = array_fill(1, $daysInMonth, 0);
 
         foreach ($paoDoneRows as $row) {
-            $d = \DateTime::createFromFormat('Y-m-d H:i:s', (new \DateTime($row['dateCommande']['date'] ?? $row['dateCommande']))->format('Y-m-d H:i:s'));
-            if (!$d) { $d = new \DateTime($row['dateCommande']); }
-            $day = (int) $d->format('j');
-            if ($day >= 1 && $day <= $daysInMonth) {
-                $byDay[$day]++;
+            $raw = $row['dateCommande'] ?? null;
+            if ($raw instanceof \DateTimeInterface) {
+                $dt = \DateTime::createFromFormat('Y-m-d H:i:s', $raw->format('Y-m-d H:i:s'));
+            } else {
+                $dt = new \DateTime(is_array($raw) && isset($raw['date']) ? $raw['date'] : (string)$raw);
             }
+            if (!$dt || is_nan($dt->getTimestamp())) continue;
+
+            $day = (int) $dt->format('j');
+            if ($day >= 1 && $day <= $daysInMonth) $byDay[$day]++;
         }
 
-        // Labels & data pour Chart.js
         $chartLabels = [];
         $chartValues = [];
         for ($i = 1; $i <= $daysInMonth; $i++) {
@@ -147,7 +150,7 @@ class PaoDashboardController extends AbstractDashboardController
             'worksThisWeekCount'    => $worksThisWeekCount,
 
             // graph mois
-            'selectedMonth'         => $monthParam,     // 'YYYY-MM' pour le <input type="month">
+            'selectedMonth'         => $monthParam,     // 'YYYY-MM'
             'chartLabels'           => $chartLabels,    // ['01','02',...]
             'chartValues'           => $chartValues,    // [0,1,2,...]
         ]);
@@ -163,7 +166,7 @@ class PaoDashboardController extends AbstractDashboardController
 
     public function configureMenuItems(): iterable
     {
-        yield MenuItem::linkToDashboard('Tableau de bord', 'fa fa-home');
+        yield MenuItem::linktoDashboard('Tableau de bord', 'fa fa-home');
         yield MenuItem::linkToCrud('PAO à traiter', 'fa fa-pencil-ruler', Commande::class)
             ->setController(PaoCommandeCrudController::class);
     }

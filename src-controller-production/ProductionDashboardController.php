@@ -25,7 +25,7 @@ class ProductionDashboardController extends AbstractDashboardController
     }
 
     #[Route('/production', name: 'production_dashboard')]
-    public function index(Request $request): Response
+    public function index(): Response
     {
         // ===== Fenêtre "aujourd'hui" (sur la base de dateCommande) =====
         $today      = new \DateTimeImmutable('today');
