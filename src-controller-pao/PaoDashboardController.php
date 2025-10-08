@@ -30,64 +30,109 @@ class PaoDashboardController extends AbstractDashboardController
     #[Route('/pao', name: 'pao_dashboard')]
     public function index(): Response
     {
-        // ===== Fenêtres temporelles "aujourd'hui" =====
-        $today      = new \DateTimeImmutable('today');
-        $startOfDay = $today->setTime(0, 0, 0);
-        $endOfDay   = $today->setTime(23, 59, 59);
+        $user = $this->getUser();
+        if (!$user) {
+            throw $this->createAccessDeniedException('Utilisateur non connecté.');
+        }
 
-        // ===== Fenêtre "semaine" (lundi -> dimanche) =====
-        $startOfWeek = (new \DateTimeImmutable('monday this week'))->setTime(0, 0, 0);
-        $endOfWeek   = (new \DateTimeImmutable('sunday this week'))->setTime(23, 59, 59);
+        // ===== Fenêtres (LOCAL server TZ) — intervalle semi-ouvert [start, next) =====
+        $startOfDay       = (new \DateTimeImmutable('today'))->setTime(0, 0, 0);
+        $startOfTomorrow  = $startOfDay->modify('+1 day');
 
-        // ===== Travaux du jour : EN COURS =====
-        $workInProgressToday = (int) $this->commandeRepository
+        // Semaine : lundi 00:00 -> lundi prochain 00:00
+        $startOfWeek      = (new \DateTimeImmutable('monday this week'))->setTime(0, 0, 0);
+        $startOfNextWeek  = $startOfWeek->modify('+1 week');
+
+        // Statuts pris en compte
+        $paoStatuses = [
+            Commande::STATUT_PAO_ATTENTE,
+            Commande::STATUT_PAO_EN_COURS,
+            Commande::STATUT_PAO_FAIT,
+            Commande::STATUT_PAO_MODIFICATION,
+        ];
+
+        // ===== Tous les travaux du jour (tous statuts) =====
+        $worksPendingCount = (int)  $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('COUNT(c.id)')
             ->where('c.statutPao = :status')
-            ->andWhere('c.dateCommande BETWEEN :start AND :end')
-            ->setParameter('status', Commande::STATUT_PAO_EN_COURS)
+            ->andWhere('c.pao = :pao')
+            ->andWhere('c.dateCommande >= :start AND c.dateCommande < :next')
+            ->setParameter('status', Commande::STATUT_PAO_ATTENTE)
+            ->setParameter('pao', $user)
             ->setParameter('start', new \DateTime($startOfDay->format('Y-m-d H:i:s')))
-            ->setParameter('end',   new \DateTime($endOfDay->format('Y-m-d H:i:s')))
+            ->setParameter('next',  new \DateTime($startOfTomorrow->format('Y-m-d H:i:s')))
+            ->getQuery()
+            ->getSingleScalarResult();
+
+            
+        // Détail par statut (si tu affiches encore les 3 cartes)
+        $workInProgressToday =(int) $this->commandeRepository
+            ->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->where('c.statutPao = :status')
+            ->andWhere('c.pao = :pao')
+            ->andWhere('c.updatedAt >= :start AND c.updatedAt < :next')
+            ->setParameter('status', Commande::STATUT_PAO_EN_COURS)
+            ->setParameter('pao', $user)
+            ->setParameter('start', new \DateTime($startOfDay->format('Y-m-d H:i:s')))
+            ->setParameter('next',  new \DateTime($startOfTomorrow->format('Y-m-d H:i:s')))
             ->getQuery()->getSingleScalarResult();
 
-        // ===== Travaux du jour : FAIT =====
         $workDoneToday = (int) $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('COUNT(c.id)')
             ->where('c.statutPao = :status')
-            ->andWhere('c.dateCommande BETWEEN :start AND :end')
+            ->andWhere('c.pao = :pao')
+            ->andWhere('c.updatedAt >= :start AND c.updatedAt < :next')
             ->setParameter('status', Commande::STATUT_PAO_FAIT)
+            ->setParameter('pao', $user)
             ->setParameter('start', new \DateTime($startOfDay->format('Y-m-d H:i:s')))
-            ->setParameter('end',   new \DateTime($endOfDay->format('Y-m-d H:i:s')))
-            ->getQuery()->getSingleScalarResult();
+            ->setParameter('next',  new \DateTime($startOfTomorrow->format('Y-m-d H:i:s')))
+            ->getQuery()
+            ->getSingleScalarResult();
 
-        // ===== Travaux du jour : MODIFICATION =====
+
         $workModificationToday = (int) $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('COUNT(c.id)')
             ->where('c.statutPao = :status')
-            ->andWhere('c.dateCommande BETWEEN :start AND :end')
+            ->andWhere('c.pao = :pao')
+            ->andWhere('c.updatedAt >= :start AND c.updatedAt < :next')
             ->setParameter('status', Commande::STATUT_PAO_MODIFICATION)
+            ->setParameter('pao', $user)
             ->setParameter('start', new \DateTime($startOfDay->format('Y-m-d H:i:s')))
-            ->setParameter('end',   new \DateTime($endOfDay->format('Y-m-d H:i:s')))
+            ->setParameter('next',  new \DateTime($startOfTomorrow->format('Y-m-d H:i:s')))
             ->getQuery()->getSingleScalarResult();
 
-        // ===== Travaux de la semaine = EN_COURS + FAIT + MODIFICATION =====
+
+        // ===== Travaux de la semaine (tous statuts) =====
         $worksThisWeekCount = (int) $this->commandeRepository
             ->createQueryBuilder('c')
             ->select('COUNT(c.id)')
             ->where('c.statutPao IN (:statuses)')
-            ->andWhere('c.dateCommande BETWEEN :weekStart AND :weekEnd')
-            ->setParameter('statuses', [
-                Commande::STATUT_PAO_EN_COURS,
-                Commande::STATUT_PAO_FAIT,
-                Commande::STATUT_PAO_MODIFICATION,
-            ])
-            ->setParameter('weekStart', new \DateTime($startOfWeek->format('Y-m-d H:i:s')))
-            ->setParameter('weekEnd',   new \DateTime($endOfWeek->format('Y-m-d H:i:s')))
+            ->andWhere('c.pao = :pao')
+            ->andWhere('c.dateCommande >= :wstart AND c.dateCommande < :wnext')
+            ->setParameter('statuses', $paoStatuses)
+            ->setParameter('pao', $user)
+            ->setParameter('wstart', new \DateTime($startOfWeek->format('Y-m-d H:i:s')))
+            ->setParameter('wnext',  new \DateTime($startOfNextWeek->format('Y-m-d H:i:s')))
             ->getQuery()->getSingleScalarResult();
 
-        // ===== Graph “PAO FAIT” par jour sur un mois (filtre ?month=YYYY-MM) =====
+        $worksDoneThisWeekCount = (int) $this->commandeRepository
+            ->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->where('c.statutPao = :status')
+            ->andWhere('c.pao = :pao')
+            ->andWhere('c.dateCommande >= :wstart AND c.dateCommande < :wnext')
+            ->setParameter('status', Commande::STATUT_PAO_FAIT)
+            ->setParameter('pao', $user)
+            ->setParameter('wstart', new \DateTime($startOfWeek->format('Y-m-d H:i:s')))
+            ->setParameter('wnext',  new \DateTime($startOfNextWeek->format('Y-m-d H:i:s')))
+            ->getQuery()->getSingleScalarResult();
+
+
+        // ===== Graph “PAO FAIT” par jour sur un mois (?month=YYYY-MM) =====
         $request    = $this->requestStack->getCurrentRequest();
         $monthParam = $request?->query->get('month');
 
@@ -102,33 +147,33 @@ class PaoDashboardController extends AbstractDashboardController
             $monthParam  = sprintf('%04d-%02d', $targetYear, $targetMonth);
         }
 
-        $startOfTargetMonth = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $targetYear, $targetMonth)))->setTime(0,0,0);
-        $endOfTargetMonth   = $startOfTargetMonth->modify('last day of this month')->setTime(23,59,59);
+        $startOfTargetMonth = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $targetYear, $targetMonth)))->setTime(0, 0, 0);
+        $startOfNextMonth   = $startOfTargetMonth->modify('+1 month');
 
-        // Récup commandes PAO FAIT sur le mois
         $paoDoneRows = $this->commandeRepository
             ->createQueryBuilder('c')
-            ->select('c.id, c.dateCommande')
+            ->select('c.id, c.updatedAt')
             ->where('c.statutPao = :status')
-            ->andWhere('c.dateCommande BETWEEN :start AND :end')
+            ->andWhere('c.pao = :pao')
+            ->andWhere('c.updatedAt >= :start AND c.updatedAt < :next')
             ->setParameter('status', Commande::STATUT_PAO_FAIT)
+            ->setParameter('pao', $user)
             ->setParameter('start', new \DateTime($startOfTargetMonth->format('Y-m-d H:i:s')))
-            ->setParameter('end',   new \DateTime($endOfTargetMonth->format('Y-m-d H:i:s')))
+            ->setParameter('next',  new \DateTime($startOfNextMonth->format('Y-m-d H:i:s')))
             ->getQuery()->getArrayResult();
 
-        // Agrégation par jour en PHP
+        // Agrégation par jour
         $daysInMonth = (int) $startOfTargetMonth->format('t');
         $byDay = array_fill(1, $daysInMonth, 0);
 
         foreach ($paoDoneRows as $row) {
-            $raw = $row['dateCommande'] ?? null;
+            $raw = $row['updatedAt'] ?? null;
             if ($raw instanceof \DateTimeInterface) {
                 $dt = \DateTime::createFromFormat('Y-m-d H:i:s', $raw->format('Y-m-d H:i:s'));
             } else {
                 $dt = new \DateTime(is_array($raw) && isset($raw['date']) ? $raw['date'] : (string)$raw);
             }
-            if (!$dt || is_nan($dt->getTimestamp())) continue;
-
+            if (!$dt) continue;
             $day = (int) $dt->format('j');
             if ($day >= 1 && $day <= $daysInMonth) $byDay[$day]++;
         }
@@ -141,18 +186,15 @@ class PaoDashboardController extends AbstractDashboardController
         }
 
         return $this->render('pao/dashboard.html.twig', [
-            // cartes "du jour"
-            'workInProgressToday'   => $workInProgressToday,
-            'workDoneToday'         => $workDoneToday,
-            'workModificationToday' => $workModificationToday,
-
-            // carte "semaine"
-            'worksThisWeekCount'    => $worksThisWeekCount,
-
-            // graph mois
-            'selectedMonth'         => $monthParam,     // 'YYYY-MM'
-            'chartLabels'           => $chartLabels,    // ['01','02',...]
-            'chartValues'           => $chartValues,    // [0,1,2,...]
+            'worksPendingCount'        => $worksPendingCount,
+            'workInProgressToday'    => $workInProgressToday,
+            'workDoneToday'          => $workDoneToday,
+            'workModificationToday'  => $workModificationToday,
+            'worksThisWeekCount'     => $worksThisWeekCount,
+             'worksDoneThisWeekCount'     => $worksDoneThisWeekCount,
+            'selectedMonth'          => $monthParam,
+            'chartLabels'            => $chartLabels,
+            'chartValues'            => $chartValues,
         ]);
     }
 

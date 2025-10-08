@@ -5,64 +5,92 @@
   <style>
     .ea-content, .ea-content .content, .ea-content .content-panel { width: 100% !important; display:block !important; }
     .content-sidebar, .ea-aside, .aside { display:none !important; }
+    .content-wrapper { display: block; }
+    .resizer-handler { display: none; }
 
-    .content-wrapper {
-      display: block;
-    }
-
-    .resizer-handler {
-        display: none; 
-    }
-    
-    .section-card .card-header{
+    .section-card .card-header {
       display:flex; align-items:center; justify-content:flex-start;
     }
-    .section-card .card-header h3{ margin:0; font-weight:600; }
-    .chart-container{ height:360px; }
+    .section-card .card-header h3 { margin:0; font-weight:600; }
+    .chart-container { height:360px; }
+
+    /* Cards du haut */
+    .dashboard-card {
+      border: none;
+      border-radius: 12px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .dashboard-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+    }
+    .dashboard-card h5 {
+      font-weight: 600;
+      font-size: 1.05rem;
+    }
+    .dashboard-card p {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 0;
+    }
   </style>
 
   <h1 class="mb-4">Tableau de bord PAO</h1>
 
   {# ===== Cartes du jour ===== #}
-  <div class="row">
-    <div class="col-md-4">
-      <div class="card bg-warning text-dark shadow mb-4">
+
+  <h2 class="mb-4">Travaux du jour</h2>
+
+  <div class="row g-3">
+    <div class="col-md-3">
+      <div class="card dashboard-card bg-secondary-subtle text-dark shadow-sm">
         <div class="card-body">
-          <h5>Travaux du jour</h5>
-          <p class="h3">{{ workInProgressToday }}</p>
+          <h5>Travaux en attente</h5> 
+          <h3>{{ worksPendingCount }}</h3>
         </div>
       </div>
     </div>
-    <div class="col-md-4">
-      <div class="card bg-success text-white shadow mb-4">
+
+    <div class="col-md-3">
+      <div class="card dashboard-card bg-info-subtle text-dark shadow-sm">
         <div class="card-body">
-          <h5>Travaux faits (aujourd’hui)</h5>
-          <p class="h3">{{ workDoneToday }}</p>
+          <h5>Travaux du jour</h5> 
+          <h3>{{ workInProgressToday }}</h3>
         </div>
       </div>
     </div>
-    <div class="col-md-4">
-      <div class="card bg-info text-dark shadow mb-4">
+
+    <div class="col-md-3">
+      <div class="card dashboard-card bg-success-subtle text-dark shadow-sm">
         <div class="card-body">
-          <h5>Travaux en modification (aujourd’hui)</h5>
-          <p class="h3">{{ workModificationToday }}</p>
+          <h5>Travaux faits</h5>
+          <h3>{{ workDoneToday }}</h3>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="card dashboard-card bg-warning-subtle text-dark shadow-sm">
+        <div class="card-body">
+          <h5>Travaux en modification</h5>
+          <h3>{{ workModificationToday }}</h3>
         </div>
       </div>
     </div>
   </div>
 
   {# ===== Carte semaine ===== #}
-  <div class="section-card card shadow mb-4">
-    <div class="card-header"><h3>Travaux de la semaine </h3></div>
+  <div class="section-card card shadow-sm mt-4 mb-4">
+    <div class="card-header"><h3>Travaux effectués cette semaine</h3></div>
     <div class="card-body">
-      <p class="display-6 mb-0">{{ worksThisWeekCount }}</p>
+      <p class="display-6 mb-0"> {{worksDoneThisWeekCount}}/{{ worksThisWeekCount }}</p>
     </div>
   </div>
 
   {# ===== Graph mensuel PAO FAIT ===== #}
-  <div class="section-card card shadow mb-4">
+  <div class="section-card card shadow-sm mb-4">
     <div class="card-header">
-      <h3>Travaux faites — par jour sur le mois</hf>
+      <h3>Travaux faits — par jour sur le mois</h3>
     </div>
     <div class="card-body">
       <form method="get" action="{{ path('pao_dashboard') }}" class="row g-3 align-items-end mb-3">
@@ -94,7 +122,10 @@
           labels,
           datasets: [{
             label: 'PAO faits / jour',
-            data: values
+            data: values,
+            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+            borderColor: 'rgba(54, 162, 235, 0.8)',
+            borderWidth: 1
           }]
         },
         options: {
